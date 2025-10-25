@@ -1,6 +1,8 @@
 import pygame
 import neat
 import os
+import pickle
+import sys
 from bird import Bird
 from pipe import Pipe
 from game import Game
@@ -69,19 +71,19 @@ def eval_genomes(genomes, config):
             if output[0] > 0.5:
                 bird.jump()
                 
+        # Verificar colisiones (iterar al revés para poder eliminar)
+        for x in range(len(birds) - 1, -1, -1):
+            if game.check_collisions(birds[x], pipes):
+                ge[x].fitness -= 1
+                birds.pop(x)
+                nets.pop(x)
+                ge.pop(x)
+        
         # Mover tuberías
         add_pipe = False
         rem = []
         for pipe in pipes:
             pipe.move()
-            
-            # Verificar colisiones
-            for x, bird in enumerate(birds):
-                if game.check_collisions(bird, pipes):
-                    ge[x].fitness -= 1
-                    birds.pop(x)
-                    nets.pop(x)
-                    ge.pop(x)
                     
             # Verificar si la tubería salió de la pantalla
             if pipe.x + 50 < 0:
@@ -107,8 +109,8 @@ def eval_genomes(genomes, config):
         # Dibujar ventana
         game.draw_window(birds, pipes, score, current_generation, len(birds))
         
-        # Si el score es muy alto, terminar
-        if score > 50:
+        # Si el score es muy alto, terminar (aumentado para permitir más aprendizaje)
+        if score > 100:
             break
             
 
@@ -130,11 +132,116 @@ def run_neat(config_path):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
     
-    # Ejecutar fitness function 50 generaciones
-    winner = p.run(eval_genomes, 50)
+    # Ejecutar fitness function hasta 100 generaciones o fitness objetivo
+    winner = p.run(eval_genomes, 100)
     
     # Mostrar el mejor genoma
     print('\n¡Mejor genoma encontrado!\n{!s}'.format(winner))
+    
+    # Guardar el mejor modelo
+    with open('best_bird.pkl', 'wb') as f:
+        pickle.dump(winner, f)
+    print('\n✅ Modelo guardado en: best_bird.pkl')
+    print('💡 Ejecuta "python main.py --play" para ver al mejor pájaro jugar\n')
+    
+    return winner, config
+
+
+def play_best(config_path):
+    """Carga y ejecuta el mejor modelo guardado."""
+    # Verificar si existe el archivo
+    if not os.path.exists('best_bird.pkl'):
+        print('❌ No se encontró best_bird.pkl')
+        print('💡 Primero entrena un modelo con: python main.py --train')
+        return
+    
+    # Cargar el mejor genoma
+    with open('best_bird.pkl', 'rb') as f:
+        winner = pickle.load(f)
+    
+    print('\n🎮 Cargando mejor modelo...')
+    print(f'Fitness del modelo: {winner.fitness if hasattr(winner, "fitness") else "N/A"}\n')
+    
+    # Cargar configuración
+    config = neat.config.Config(
+        neat.DefaultGenome,
+        neat.DefaultReproduction,
+        neat.DefaultSpeciesSet,
+        neat.DefaultStagnation,
+        config_path
+    )
+    
+    # Crear red neuronal del mejor genoma
+    net = neat.nn.FeedForwardNetwork.create(winner, config)
+    
+    # Inicializar juego
+    game = Game()
+    clock = pygame.time.Clock()
+    bird = Bird(230, 350)
+    pipes = [Pipe(600)]
+    score = 0
+    
+    run = True
+    print('🚀 Ejecutando mejor pájaro... (Cierra la ventana para salir)\n')
+    
+    while run:
+        clock.tick(40)
+        
+        # Eventos
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                run = False
+                pygame.quit()
+                return
+                
+        # Determinar qué tubería usar para input
+        pipe_ind = 0
+        if len(pipes) > 1 and bird.x > pipes[0].x + 50:
+            pipe_ind = 1
+            
+        # Mover pájaro
+        bird.move()
+        
+        # Decisión de la IA
+        output = net.activate((
+            bird.y,
+            abs(bird.y - pipes[pipe_ind].height),
+            abs(bird.y - pipes[pipe_ind].bottom)
+        ))
+        
+        if output[0] > 0.5:
+            bird.jump()
+            
+        # Verificar colisión primero
+        if game.check_collisions(bird, pipes):
+            print(f'💀 Game Over! Score final: {score}')
+            run = False
+            break
+        
+        # Mover tuberías
+        add_pipe = False
+        rem = []
+        for pipe in pipes:
+            pipe.move()
+                
+            if pipe.x + 50 < 0:
+                rem.append(pipe)
+                
+            if not pipe.passed and pipe.x < bird.x:
+                pipe.passed = True
+                add_pipe = True
+                
+        if add_pipe:
+            score += 1
+            pipes.append(Pipe(600))
+            
+        for r in rem:
+            pipes.remove(r)
+            
+        # Dibujar (sin mostrar generación, solo el pájaro jugando)
+        game.draw_window([bird], pipes, score, "PLAY", 1)
+        
+    pygame.quit()
 
 
 if __name__ == '__main__':
@@ -145,6 +252,23 @@ if __name__ == '__main__':
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'config-neat.txt')
     
-    # Ejecutar NEAT
-    run_neat(config_path)
+    # Parsear argumentos
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--play':
+            play_best(config_path)
+        elif sys.argv[1] == '--train':
+            run_neat(config_path)
+        else:
+            print('Uso:')
+            print('  python main.py --train   # Entrenar nuevo modelo')
+            print('  python main.py --play    # Jugar con el mejor modelo')
+    else:
+        # Por defecto, verificar si existe modelo
+        if os.path.exists('best_bird.pkl'):
+            print('💡 Modelo encontrado. ¿Qué quieres hacer?')
+            print('  python main.py --train   # Entrenar desde cero')
+            print('  python main.py --play    # Ver al mejor pájaro jugar\n')
+        else:
+            print('🎓 Primera vez. Entrenando modelo...\n')
+            run_neat(config_path)
 

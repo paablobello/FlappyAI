@@ -5,8 +5,8 @@ import random
 class Pipe:
     """Clase que representa un par de tuberías (superior e inferior)."""
     
-    GAP = 150  # Espacio entre tuberías (reducido para más dificultad)
-    VEL = 7    # Velocidad de movimiento (aumentado para más dificultad)
+    GAP = 200  # Espacio entre tuberías
+    VEL = 5    # Velocidad de movimiento
     
     def __init__(self, x):
         self.x = x
@@ -25,7 +25,7 @@ class Pipe:
         
     def set_height(self):
         """Define la altura aleatoria de las tuberías."""
-        self.height = random.randrange(100, 500)
+        self.height = random.randrange(50, 450)
         self.top = self.height - self.PIPE_TOP if hasattr(self, 'PIPE_TOP') and self.PIPE_TOP else self.height
         self.bottom = self.height + self.gap
         
